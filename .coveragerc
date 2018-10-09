@@ -7,3 +7,6 @@ omit =
     restfulpy/testing/*
     restfulpy/mimetypes_.py
     restfulpy/db.py
+    restfulpy/testing.py
+    restfulpy/application/cli/*
+	restfulpy/scaffolding

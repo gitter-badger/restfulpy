@@ -1,11 +1,10 @@
+import warnings
 
 
-from restfulpy.application import Application
+from .application import Application
 
 
-__version__ = '0.19.1'
+warnings.filterwarnings('ignore', message='Unknown REQUEST_METHOD')
 
 
-__all__ = [
-    'Application'
-]
+__version__ = '2.5.0'

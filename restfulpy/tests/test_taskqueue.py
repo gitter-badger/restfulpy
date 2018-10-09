@@ -1,17 +1,13 @@
-
-import unittest
 import threading
 
-from restfulpy.taskqueue import Task, worker
-from restfulpy.testing import WebAppTestCase
-from restfulpy.tests.helpers import MockupApplication
+from restfulpy.taskqueue import RestfulpyTask, worker
 
 
 awesome_task_done = threading.Event()
 another_task_done = threading.Event()
 
 
-class AwesomeTask(Task):
+class AwesomeTask(RestfulpyTask):
 
     __mapper_args__ = {
         'polymorphic_identity': 'awesome_task'
@@ -21,7 +17,7 @@ class AwesomeTask(Task):
         awesome_task_done.set()
 
 
-class AnotherTask(Task):
+class AnotherTask(RestfulpyTask):
 
     __mapper_args__ = {
         'polymorphic_identity': 'another_task'
@@ -31,7 +27,7 @@ class AnotherTask(Task):
         another_task_done.set()
 
 
-class BadTask(Task):
+class BadTask(RestfulpyTask):
 
     __mapper_args__ = {
         'polymorphic_identity': 'bad_task'
@@ -41,67 +37,63 @@ class BadTask(Task):
         raise Exception()
 
 
-class TaskQueueTestCase(WebAppTestCase):
-    application = MockupApplication('MockupApplication', None)
+def test_worker(db):
+    session = db()
+    awesome_task = AwesomeTask()
+    session.add(awesome_task)
 
-    def test_worker(self):
-        # noinspection PyArgumentList
-        awesome_task = AwesomeTask()
-        self.session.add(awesome_task)
+    another_task = AnotherTask()
+    session.add(another_task)
 
-        another_task = AnotherTask()
-        self.session.add(another_task)
+    bad_task = BadTask()
+    session.add(bad_task)
 
-        bad_task = BadTask()
-        self.session.add(bad_task)
+    session.commit()
 
-        self.session.commit()
+    tasks = worker(tries=0, filters=RestfulpyTask.type == 'awesome_task')
+    assert len(tasks) == 1
 
-        tasks = worker(tries=0, filters=Task.type == 'awesome_task')
-        self.assertEqual(len(tasks), 1)
-        self.assertTrue(awesome_task_done.is_set())
-        self.assertFalse(another_task_done.is_set())
+    assert awesome_task_done.is_set() == True
+    assert another_task_done.is_set() == False
 
-        self.session.refresh(awesome_task)
-        self.assertEqual(awesome_task.status, 'success')
+    session.refresh(awesome_task)
+    assert awesome_task.status == 'success'
 
-        tasks = worker(tries=0, filters=Task.type == 'bad_task')
-        self.assertEqual(len(tasks), 1)
-        bad_task_id = tasks[0][0]
-        self.session.refresh(bad_task)
-        self.assertEqual(bad_task.status, 'failed')
+    tasks = worker(tries=0, filters=RestfulpyTask.type == 'bad_task')
+    assert len(tasks) == 1
+    bad_task_id = tasks[0][0]
+    session.refresh(bad_task)
+    assert bad_task.status == 'failed'
 
-        tasks = worker(tries=0, filters=Task.type == 'bad_task')
-        self.assertEqual(len(tasks), 0)
+    tasks = worker(tries=0, filters=RestfulpyTask.type == 'bad_task')
+    assert len(tasks) == 0
 
-        # Reset the status of one task
-        self.session.refresh(bad_task)
-        bad_task.status = 'in-progress'
-        self.session.commit()
-        self.session.refresh(bad_task)
+    # Reset the status of one task
+    session.refresh(bad_task)
+    bad_task.status = 'in-progress'
+    session.commit()
+    session.refresh(bad_task)
 
-        Task.reset_status(bad_task_id, self.session)
-        self.session.commit()
-        tasks = worker(tries=0, filters=Task.type == 'bad_task')
-        self.assertEqual(len(tasks), 1)
+    RestfulpyTask.reset_status(bad_task_id, session)
+    session.commit()
+    tasks = worker(tries=0, filters=RestfulpyTask.type == 'bad_task')
+    assert len(tasks) == 1
 
-        tasks = worker(tries=0, filters=Task.type == 'bad_task')
-        self.assertEqual(len(tasks), 0)
+    tasks = worker(tries=0, filters=RestfulpyTask.type == 'bad_task')
+    assert len(tasks) == 0
 
-        # Cleanup all tasks
-        Task.cleanup(self.session, statuses=('in-progress', 'failed'))
-        self.session.commit()
+    # Cleanup all tasks
+    RestfulpyTask.cleanup(session, statuses=('in-progress', 'failed'))
+    session.commit()
 
-        tasks = worker(tries=0, filters=Task.type == 'bad_task')
-        self.assertEqual(len(tasks), 1)
+    tasks = worker(tries=0, filters=RestfulpyTask.type == 'bad_task')
+    assert len(tasks) == 1
 
-        tasks = worker(tries=0, filters=Task.type == 'bad_task')
-        self.assertEqual(len(tasks), 0)
+    tasks = worker(tries=0, filters=RestfulpyTask.type == 'bad_task')
+    assert len(tasks) == 0
 
-        # Doing all remaining tasks
-        tasks = worker(tries=0)
-        self.assertEqual(len(tasks), 1)
+    # Doing all remaining tasks
+    tasks = worker(tries=0)
+    assert len(tasks) == 1
 
 
-if __name__ == '__main__':  # pragma: no cover
-    unittest.main()

@@ -1,10 +1,7 @@
-
-import unittest
-
+from bddrest.authoring import response
 from nanohttp import json, Controller, context
 
-from restfulpy.testing import WebAppTestCase
-from restfulpy.tests.helpers import MockupApplication
+from restfulpy.testing import ApplicableTestCase
 
 
 class Root(Controller):
@@ -14,17 +11,18 @@ class Root(Controller):
         return context.form
 
 
-class JSONPayloadTestCase(WebAppTestCase):
-    application = MockupApplication('MockupApplication', Root())
+class TestJSONPayload(ApplicableTestCase):
+    __controller_factory__ = Root
 
     def test_index(self):
         payload = dict(
             a=1,
             b=2
         )
-        response, headers = self.request('ALL', 'GET', '/', json=payload)
-        self.assertDictEqual(response, payload)
 
+        with self.given(
+            'Testing json pyload',
+            json=payload,
+        ):
+            assert response.json ==  payload
 
-if __name__ == '__main__':  # pragma: no cover
-    unittest.main()

@@ -1,22 +1,22 @@
-
 import os
 from os.path import exists
 from urllib.parse import urlparse
 
-from sqlalchemy import create_engine
 from nanohttp import settings
+from sqlalchemy import create_engine
 
 
 class AbstractDatabaseManager(object):
 
     def __init__(self):
-        self.db_uri = settings.db.uri
-        self.db_name = urlparse(self.db_uri).path.lstrip('/')
-        self.admin_uri = settings.db.administrative_uri
-        self.admin_db_name = urlparse(settings.db.administrative_uri).path.lstrip('/')
+        self.db_url = settings.db.url
+        self.db_name = urlparse(self.db_url).path.lstrip('/')
+        self.admin_url = settings.db.administrative_url
+        self.admin_db_name = \
+            urlparse(settings.db.administrative_url).path.lstrip('/')
 
     def __enter__(self):
-        self.engine = create_engine(self.admin_uri)
+        self.engine = create_engine(self.admin_url)
         self.connection = self.engine.connect()
         self.connection.execute('commit')
         return self
@@ -47,7 +47,9 @@ class PostgresManager(AbstractDatabaseManager):
         return self
 
     def database_exists(self):
-        r = self.connection.execute('SELECT 1 FROM pg_database WHERE datname = \'%s\'' % self.db_name)
+        r = self.connection.execute(
+            f'SELECT 1 FROM pg_database WHERE datname = \'{self.db_name}\''
+        )
         try:
             ret = r.cursor.fetchall()
             return ret
@@ -55,27 +57,27 @@ class PostgresManager(AbstractDatabaseManager):
             r.cursor.close()
 
     def create_database(self):
-        self.connection.execute('CREATE DATABASE %s' % self.db_name)
-        self.connection.execute('commit')
+        self.connection.execute(f'CREATE DATABASE {self.db_name}')
+        self.connection.execute(f'COMMIT')
 
     def drop_database(self):
-        self.connection.execute('DROP DATABASE IF EXISTS %s' % self.db_name)
-        self.connection.execute('commit')
+        self.connection.execute(f'DROP DATABASE IF EXISTS {self.db_name}')
+        self.connection.execute(f'COMMIT')
 
 
 class SqliteManager(AbstractDatabaseManager):
 
     def __init__(self):
         super().__init__()
-        self.filename = self.db_uri.replace('sqlite:///', '')
+        self.filename = self.db_url.replace('sqlite:///', '')
 
     def database_exists(self):
         return exists(self.filename)
 
     def create_database(self):
         if self.database_exists():
-            raise RuntimeError('The file is already exists: %s' % self.filename)
-        print('Creating: %s' % self.filename)
+            raise RuntimeError(f'The file is already exists: {self.filename}')
+        print(f'Creating: {self.filename}')
         open(self.filename, 'a').close()
 
     def drop_database(self):
@@ -83,16 +85,16 @@ class SqliteManager(AbstractDatabaseManager):
         os.remove(self.filename)
 
 
-# noinspection PyAbstractClass
 class DatabaseManager(AbstractDatabaseManager):
 
     def __new__(cls, *args, **kwargs):
-        uri = settings.db.uri
-        if uri.startswith('sqlite'):
+        url = settings.db.url
+        if url.startswith('sqlite'):
             manager_class = SqliteManager
-        elif uri.startswith('postgres'):
+        elif url.startswith('postgres'):
             manager_class = PostgresManager
         else:
-            raise ValueError('Unsupported database uri: %s' % uri)
+            raise ValueError(f'Unsupported database url: {url}')
 
         return manager_class(*args, **kwargs)
+

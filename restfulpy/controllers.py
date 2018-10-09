@@ -1,12 +1,9 @@
-
-import warnings
+import types
+from urllib.parse import parse_qs
 
 from nanohttp import Controller, context, json, RestController, action
 
 from restfulpy.orm import DBSession
-
-
-warnings.filterwarnings('ignore', message='Unknown REQUEST_METHOD')
 
 
 class RootController(Controller):
@@ -15,7 +12,10 @@ class RootController(Controller):
 
         if context.method == 'options':
             context.response_encoding = 'utf-8'
-            context.response_headers.add_header("Cache-Control", "no-cache,no-store")
+            context.response_headers.add_header(
+                'Cache-Control',
+                'no-cache,no-store'
+            )
             return b''
 
         return super().__call__(*remaining_paths)
@@ -27,6 +27,19 @@ class ModelRestController(RestController):
     @json
     def metadata(self):
         return self.__model__.json_metadata()
+
+
+def split_path(url):
+    if '?' in url:
+        path, query = url.split('?')
+    else:
+        path, query = url, ''
+
+    return path, {k: v[0] if len(v) == 1 else v for k, v in parse_qs(
+        query,
+        keep_blank_values=True,
+        strict_parsing=False
+    ).items()}
 
 
 class JsonPatchControllerMixin:
@@ -46,17 +59,23 @@ class JsonPatchControllerMixin:
         try:
             for patch in patches:
                 context.form = patch.get('value', {})
-                context.method = patch['op']
+                path, context.query = split_path(patch['path'])
+                context.method = patch['op'].lower()
 
-                remaining_paths = patch['path'].split('/')
+                remaining_paths = path.split('/')
                 if remaining_paths and not remaining_paths[0]:
                     return_data = self()
                 else:
                     return_data = self(*remaining_paths)
 
-                results.append(return_data)
+                if isinstance(return_data, types.GeneratorType):
+                    results.append('"%s"' % ''.join(list(return_data)))
+                else:
+                    results.append(return_data)
 
                 DBSession.flush()
+                context.query = {}
+
             DBSession.commit()
             return '[%s]' % ',\n'.join(results)
         except:

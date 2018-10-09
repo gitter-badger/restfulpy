@@ -9,12 +9,15 @@ from sqlalchemy.sql.schema import MetaData
 from sqlalchemy.ext.declarative import declarative_base
 from alembic import config, command
 
-from .field import Field, relationship, composite
-from .mixines import ModifiedMixin, SoftDeleteMixin, TimestampMixin, ActivationMixin, PaginationMixin, FilteringMixin, \
-    OrderingMixin, OrderableMixin, ApproveRequiredMixin, FullTextSearchMixin
+from .field import Field, relationship, composite, synonym
 from .metadata import MetadataField
+from .mixins import ModifiedMixin, SoftDeleteMixin, TimestampMixin, \
+    ActivationMixin, PaginationMixin, FilteringMixin, OrderingMixin, \
+    ApproveRequiredMixin, FullTextSearchMixin, AutoActivationMixin, \
+    DeactivationMixin
 from .models import BaseModel
 from .fulltext_search import to_tsvector, fts_escape
+from .types import FakeJson
 
 # Global session manager: DBSession() returns the Thread-local
 # session object appropriate for the current web request.
@@ -31,13 +34,9 @@ metadata = MetaData()
 
 DeclarativeBase = declarative_base(cls=BaseModel, metadata=metadata)
 
-# There are two convenient ways for you to spare some typing.
-# You can have a query property on all your model classes by doing this:
-DeclarativeBase.query = DBSession.query_property()
 
-
-def create_engine(uri=None, echo=None):
-    return sa_create_engine(uri or settings.db.uri, echo=echo or settings.db.echo)
+def create_engine(url=None, echo=None):
+    return sa_create_engine(url or settings.db.url, echo=echo or settings.db.echo)
 
 
 def init_model(engine):
@@ -46,23 +45,18 @@ def init_model(engine):
     :param engine: SqlAlchemy engine to bind the session
     :return:
     """
-
-    if DBSession.registry.has():
-        DBSession.remove()
-
+    DBSession.remove()
     DBSession.configure(bind=engine)
 
 
 def drop_all(session=None):  # pragma: no cover
     session = session or DBSession
-    # noinspection PyUnresolvedReferences
     engine = session.bind
     metadata.drop_all(bind=engine)
 
 
 def setup_schema(session=None):  # pragma: no cover
     session = session or DBSession
-    # noinspection PyUnresolvedReferences
     engine = session.bind
     metadata.create_all(bind=engine)
 
@@ -80,7 +74,6 @@ def create_thread_unsafe_session():  # pragma: no cover
 
 def commit(func):
 
-    # noinspection PyUnresolvedReferences
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
 

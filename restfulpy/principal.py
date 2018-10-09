@@ -1,29 +1,30 @@
-import base64
+from itsdangerous import TimedJSONWebSignatureSerializer, \
+    JSONWebSignatureSerializer
+from nanohttp import settings, context, HTTPForbidden
 
-from itsdangerous import TimedJSONWebSignatureSerializer, JSONWebSignatureSerializer
-from nanohttp import settings, context
 
-
-class JwtPrincipal:
+class BaseJwtPrincipal:
     def __init__(self, payload):
         self.payload = payload
 
     @classmethod
-    def create_serializer(cls, force=False):
+    def create_serializer(cls, force=False, max_age=None):
+        config = cls.get_config()
+
         if force:
             return JSONWebSignatureSerializer(
-                settings.jwt.secret,
-                algorithm_name=settings.jwt.algorithm
+                config['secret'],
+                algorithm_name=config['algorithm']
             )
         else:
             return TimedJSONWebSignatureSerializer(
-                settings.jwt.secret,
-                expires_in=settings.jwt.max_age,
-                algorithm_name=settings.jwt.algorithm
+                config['secret'],
+                expires_in=max_age or config['max_age'],
+                algorithm_name=config['algorithm']
             )
 
-    def dump(self):
-        return self.create_serializer().dumps(self.payload)
+    def dump(self, max_age=None):
+        return self.create_serializer(max_age=max_age).dumps(self.payload)
 
     @classmethod
     def load(cls, encoded, force=False):
@@ -32,11 +33,27 @@ class JwtPrincipal:
         payload = cls.create_serializer(force=force).loads(encoded)
         return cls(payload)
 
+    @classmethod
+    def get_config(cls):
+        raise NotImplementedError()
+
+
+class JwtPrincipal(BaseJwtPrincipal):
     def is_in_roles(self, *roles):
         if 'roles' in self.payload:
             if set(self.payload['roles']).intersection(roles):
                 return True
         return False
+
+    def assert_roles(self, *roles):
+        """
+        .. versionadded:: 0.29
+
+        :param roles:
+        :return:
+        """
+        if roles and not self.is_in_roles(*roles):
+            raise HTTPForbidden()
 
     @property
     def email(self):
@@ -53,6 +70,15 @@ class JwtPrincipal:
     @property
     def roles(self):
         return self.payload.get('roles', [])
+
+    @classmethod
+    def get_config(cls):
+        """
+        Warning! Returned value is a dict, so it's mutable. If you modify this
+        value, default config of the whole project will be changed and it may
+        cause unpredictable problems.
+        """
+        return settings.jwt
 
 
 class JwtRefreshToken:

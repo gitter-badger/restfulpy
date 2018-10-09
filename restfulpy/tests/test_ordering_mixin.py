@@ -1,22 +1,25 @@
-import unittest
+from datetime import datetime
 
-from sqlalchemy import Integer, Unicode
+from nanohttp.contexts import Context
+from sqlalchemy import Integer, Unicode, DateTime
 from sqlalchemy.orm import synonym
 
-from nanohttp import settings
-from nanohttp.contexts import Context
-
-from restfulpy.testing import WebAppTestCase
-from restfulpy.tests.helpers import MockupApplication
-from restfulpy.orm import DeclarativeBase, Field, DBSession, OrderingMixin, OrderableMixin
+from restfulpy.orm import DeclarativeBase, Field, OrderingMixin
 
 
-class OrderableOrderingObject(OrderableMixin, OrderingMixin, DeclarativeBase):
+class OrderingObject(OrderingMixin, DeclarativeBase):
     __tablename__ = 'orderable_ordering_object'
 
     id = Field(Integer, primary_key=True)
     title = Field(Unicode(50))
     _age = Field(Integer)
+    created_at = Field(
+        DateTime,
+        nullable=False,
+        json='createdAt',
+        readonly=True,
+        default=datetime.utcnow,
+    )
 
     def _set_age(self, age):
         self._age = age
@@ -27,66 +30,55 @@ class OrderableOrderingObject(OrderableMixin, OrderingMixin, DeclarativeBase):
     age = synonym('_age', descriptor=property(_get_age, _set_age))
 
 
-class OrderingObject(OrderingMixin, DeclarativeBase):
-    __tablename__ = 'ordering_object'
+def test_ordering_mixin(db):
+    session =db()
 
-    id = Field(Integer, primary_key=True)
-    title = Field(Unicode(50))
+    for i in range(1, 6):
+        obj = OrderingObject(
+            title=f'object {6-i//2}',
+            age=i * 10,
+        )
+        session.add(obj)
 
+    session.commit()
 
-class OrderingMixinTestCase(WebAppTestCase):
-    application = MockupApplication('MockupApplication', None)
-    __configuration__ = '''
-    db:
-      uri: sqlite://    # In memory DB
-      echo: false
-    '''
+    query = session.query(OrderingObject)
 
-    @classmethod
-    def configure_app(cls):
-        cls.application.configure(force=True)
-        settings.merge(cls.__configuration__)
+    # Ascending
+    with Context({'QUERY_STRING': 'sort=id'}):
+        result = OrderingObject.sort_by_request(query).all()
+        assert result[0].id == 1
+        assert result[-1].id == 5
 
-    def test_ordering_mixin(self):
-        for i in range(1, 6):
-            # noinspection PyArgumentList
-            obj = OrderableOrderingObject(title='object %s' % i, age=i * 10)
-            DBSession.add(obj)
+    # Descending
+    with Context({'QUERY_STRING': 'sort=-id'}):
+        result = OrderingObject.sort_by_request(query).all()
+        assert result[0].id == 5
+        assert result[-1].id == 1
 
-            # noinspection PyArgumentList
-            obj = OrderingObject(title='object %s' % i,)
-            DBSession.add(obj)
-        DBSession.commit()
+    # Sort by Synonym Property
+    with Context({'QUERY_STRING': 'sort=age'}):
+        result = OrderingObject.sort_by_request(query).all()
+        assert result[0].id == 1
+        assert result[-1].id == 5
 
-        # Default soring with Orderable objects
-        with Context({'QUERY_STRING': ''}, self.application):
-            result = OrderableOrderingObject.sort_by_request().all()
-            self.assertEqual(result[0].id, 1)
-            self.assertEqual(result[-1].id, 5)
+    # Mutiple sort criteria
+    with Context({'QUERY_STRING': 'sort=title,id'}):
+        result = OrderingObject.sort_by_request(query).all()
+        assert result[0].id == 4
+        assert result[1].id == 5
 
-        # Default soring without Orderable objects
-        with Context({'QUERY_STRING': ''}, self.application):
-            result = OrderingObject.sort_by_request().all()
-            self.assertEqual(len(result), 5)
+        assert result[2].id == 2
+        assert result[3].id == 3
 
-        # Ascending
-        with Context({'QUERY_STRING': 'sort=id'}, self.application):
-            result = OrderableOrderingObject.sort_by_request().all()
-            self.assertEqual(result[0].id, 1)
-            self.assertEqual(result[-1].id, 5)
+        assert result[4].id == 1
 
-        # Descending
-        with Context({'QUERY_STRING': 'sort=-id'}, self.application):
-            result = OrderableOrderingObject.sort_by_request().all()
-            self.assertEqual(result[0].id, 5)
-            self.assertEqual(result[-1].id, 1)
+    # Sort by date
+    with Context({'QUERY_STRING': 'sort=-createdAt'}):
+        result = OrderingObject.sort_by_request(query).all()
+        assert result[0].id == 5
+        assert result[1].id == 4
+        assert result[2].id == 3
+        assert result[3].id == 2
+        assert result[4].id == 1
 
-        # Sort by Synonym Property
-        with Context({'QUERY_STRING': 'sort=age'}, self.application):
-            result = OrderableOrderingObject.sort_by_request().all()
-            self.assertEqual(result[0].id, 1)
-            self.assertEqual(result[-1].id, 5)
-
-
-if __name__ == '__main__':  # pragma: no cover
-    unittest.main()

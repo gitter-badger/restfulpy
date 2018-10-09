@@ -1,3 +1,6 @@
-nose
 coverage
 coveralls
+freezegun
+pytest-pudb
+pytest-cov
+sqlalchemy_schemadisplay
